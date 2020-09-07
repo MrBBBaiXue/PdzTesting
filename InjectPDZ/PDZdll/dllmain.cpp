@@ -5,9 +5,9 @@
 
 long newRa3Ftell(FILE* file);
 
-auto vc2005 = GetModuleHandleW(L"MSVCR80.dll");
-auto ra3Ftell = reinterpret_cast<decltype(&ftell)>(GetProcAddress(vc2005, "ftell"));
-auto ra3Fflush = reinterpret_cast<decltype(&ftell)>(GetProcAddress(vc2005, "fflush"));
+HMODULE vc2005;
+auto ra3Ftell = static_cast<decltype(&ftell)>(nullptr);
+auto ra3Fflush = static_cast<decltype(&fflush)>(nullptr);
 
 void __declspec(dllexport) __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* remoteEntryInfo)
 {
@@ -17,11 +17,13 @@ void __declspec(dllexport) __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO
 		MessageBox(NULL, L"Module vc2005 not found!" , L"Error" , MB_ICONEXCLAMATION | MB_OK);
 		return;
 	}	
+	ra3Ftell = reinterpret_cast<decltype(&ftell)>(GetProcAddress(vc2005, "ftell"));
 	if (ra3Ftell == NULL)
 	{
 		MessageBox(NULL, L"Module ra3Ftell not found!", L"Error", MB_ICONEXCLAMATION | MB_OK);
 		return;
 	}
+	ra3Fflush = reinterpret_cast<decltype(&fflush)>(GetProcAddress(vc2005, "fflush"));
 	if (ra3Fflush == NULL)
 	{
 		MessageBox(NULL, L"Module ra3Fflush not found!", L"Error", MB_ICONEXCLAMATION | MB_OK);

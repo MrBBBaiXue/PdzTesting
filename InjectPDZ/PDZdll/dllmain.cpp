@@ -9,7 +9,7 @@ HMODULE vc2005;
 auto ra3Ftell = static_cast<decltype(&ftell)>(nullptr);
 auto ra3Fflush = static_cast<decltype(&fflush)>(nullptr);
 
-void __declspec(dllexport) __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* remoteEntryInfo)
+extern "C" void __declspec(dllexport) __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* remoteEntryInfo)
 {
 	vc2005 = GetModuleHandleW(L"MSVCR80.dll");
 	if (vc2005 == NULL)
@@ -51,6 +51,7 @@ void __declspec(dllexport) __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO
 long newRa3Ftell(FILE* file)
 {
 	ra3Fflush(file);
+	MessageBox(NULL, L"Flush complete!", L"Error", MB_ICONEXCLAMATION | MB_OK);
 	return ra3Ftell(file);
 }
 

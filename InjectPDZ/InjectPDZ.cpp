@@ -4,11 +4,14 @@
 #include <iostream>
 #include <string>
 #include <cstdio>
+#include <filesystem>
 
 int main()
 {
     int processID;
-    std::wstring dllName = L"pdz.dll";
+    std::wstring dllName = L".\\pdz.dll";
+    const auto dllPath = std::filesystem::absolute(std::filesystem::path{ dllName });
+    std::cout << dllPath << std::endl;
     std::cout << "Type the ProcessID you want to inject \"pdz.dll\" to." << std::endl;
     std::cin >> processID;
     //Injection
@@ -16,6 +19,8 @@ int main()
     {
         std::cout << "Injecting..." << std::endl;
         auto result = RhInjectLibrary(processID, 0, EASYHOOK_INJECT_DEFAULT, dllName.data(), nullptr, nullptr, 0);
+        std::cout << "Result : " << result << std::endl;
+        system("pause");
     }
     catch (std::exception e)
     {

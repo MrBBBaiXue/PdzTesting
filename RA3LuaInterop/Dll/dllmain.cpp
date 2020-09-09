@@ -366,7 +366,9 @@ FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
     {
         //ToDo : Remove this messageBox after testing.
         MessageBox(NULL, L"Get RA3Replay opening!", L"Info", MB_ICONEXCLAMATION | MB_OK);
-        replayFile = ra3__wfopen(fileName,mode);
+        FILE* file = ra3__wfopen(fileName, mode);
+        replayFile = file;
+        return file;
     }
     return ra3__wfopen(fileName,mode);
 }
@@ -377,8 +379,6 @@ size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, F
     {
         //game is writing replays!
         replayHeader = (std::string)(char*)buffer;
-        MessageBox(NULL, L"Writing...", L"Info", MB_ICONEXCLAMATION | MB_OK);
-        MessageBox(NULL, (LPCWSTR)replayHeader.c_str(), L"replayHeader", MB_ICONEXCLAMATION | MB_OK);
         replayHeaderSize = elementSize;
     }
     return ra3_fwrite(buffer,elementSize,elementCount,file);

@@ -4,6 +4,7 @@
 
 #include <easyhook.h>
 #include <boost/locale.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -272,3 +273,5 @@ void printLuaFunction(std::string_view const name, void const* address)
         that.offset = offset;
     }
 }
+
+

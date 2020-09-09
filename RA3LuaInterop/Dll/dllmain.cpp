@@ -204,15 +204,17 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
             }
 
             auto const length = lua_strlen(L, 1);
-            static auto yes = true;
-            if (not yes)
-            {
-                return 0;
-            }
-            if (MessageBoxA(nullptr, pointer, "From Lua", MB_YESNO) != IDYES)
-            {
-                yes = false;
-            }
+            //static auto yes = true;
+            //if (not yes)
+            //{
+            //    return 0;
+            //}
+            //if (
+            MessageBoxA(nullptr, pointer, "From Lua", MB_YESNO);
+                    //!= IDYES)
+            //{
+            //    yes = false;
+            //}
             return 0;
         };
         

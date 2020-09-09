@@ -37,6 +37,23 @@ auto originalLuaBindingsSetter = static_cast<void*>(nullptr);
 auto originalLuaVCClosure = static_cast<void*>(nullptr);
 auto originalLuaSetGlobal = static_cast<void*>(nullptr);
 
+//Edited Hooking functions
+HMODULE vc2005;
+long new_ftell(FILE* file);
+FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode);
+size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file);
+int new_fclose(FILE* file);
+
+auto ra3_ftell = static_cast<decltype(&ftell)>(nullptr);
+auto ra3_fflush = static_cast<decltype(&fflush)>(nullptr);
+auto ra3__wfopen = static_cast<decltype(&_wfopen)>(nullptr);
+auto ra3_fwrite = static_cast<decltype(&fwrite)>(nullptr);
+auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
+
+FILE* replayFile;
+std::string replayHeader;
+size_t replayHeaderSize;
+
 auto mutex = std::mutex{};
 auto output = std::ofstream{};
 
@@ -98,7 +115,56 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
         installHook(originalLuaBindingsSetter, newLuaBindingsSetter);
         printLine("installing lua set global hook");
         installHook(originalLuaSetGlobal, newLuaSetGlobal);
-        printLine("everything done");
+        printLine("installing hook functions....");
+        vc2005 = GetModuleHandleW(L"MSVCR80.dll");
+        if (vc2005 == NULL)
+        {
+            printLine("HMODULE vc2005 not found!");
+            return;
+        }
+        //
+        ra3_ftell = reinterpret_cast<decltype(&ftell)>(GetProcAddress(vc2005, "ftell"));
+        if (ra3_ftell == NULL)
+        {
+            printLine("ra3_ftell not found!");
+            return;
+        }
+        ra3_fflush = reinterpret_cast<decltype(&fflush)>(GetProcAddress(vc2005, "fflush"));
+        if (ra3_fflush == NULL)
+        {
+            printLine("ra3_fflush not found!");
+            return;
+        }
+        ra3__wfopen = reinterpret_cast<decltype(&_wfopen)>(GetProcAddress(vc2005, "_wfopen"));
+        if (ra3__wfopen == NULL)
+        {
+            printLine("ra3__wfopen not found!");
+            return;
+        }
+        ra3_fwrite = reinterpret_cast<decltype(&fwrite)>(GetProcAddress(vc2005, "fwrite"));
+        if (ra3_fwrite == NULL)
+        {
+            printLine("ra3_fwrite not found!");
+            return;
+        }
+        ra3_fclose = reinterpret_cast<decltype(&fclose)>(GetProcAddress(vc2005, "fclose"));
+        if (ra3_fclose == NULL)
+        {
+            printLine("ra3_fclose not found!");
+            return;
+        }
+        //hooking...
+        installHook(ra3_ftell, new_ftell);
+        installHook(ra3__wfopen, new__wfopen);
+        installHook(ra3_fwrite, new_fwrite);
+        installHook(ra3_fclose, new_fclose);
+        //
+        const auto processHeap = GetProcessHeap();
+        if (processHeap == nullptr)
+        {
+            return;
+        }
+        printLine("everything done.");
     }
     catch (std::exception const& e)
     {
@@ -215,7 +281,8 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
             //{
             //    yes = false;
             //}
-            return 0;
+            //ToDo : analyse lua script not running...
+            //return 0;
         };
         
         static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, messageBox, 0);
@@ -276,4 +343,54 @@ __declspec(naked) void newLuaSetGlobal()
         
         jmp originalLuaSetGlobal;
     }
+}
+
+long new_ftell(FILE* file)
+{
+    if (file == replayFile)
+    {
+        replayFile = NULL;
+        //ToDo : Remove this....
+        MessageBox(NULL, (LPCWSTR)replayHeader.c_str(), L"replayHeader", MB_ICONEXCLAMATION | MB_OK);
+    }
+    //ToDo : Analyse
+    return ra3_ftell(file);
+}
+
+FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
+{
+    std::wstring wFileName = fileName;
+    std::wstring wMode = mode;
+    //std::transform(begin(wFileName), end(wFileName), begin(wFileName), std::toupper);
+    if (wFileName.ends_with(L".RA3Replay") && wMode == L"wb+")
+    {
+        //ToDo : Remove this messageBox after testing.
+        MessageBox(NULL, L"Get RA3Replay opening!", L"Info", MB_ICONEXCLAMATION | MB_OK);
+        replayFile = ra3__wfopen(fileName,mode);
+    }
+    return ra3__wfopen(fileName,mode);
+}
+
+size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file)
+{
+    if (file == replayFile)
+    {
+        //game is writing replays!
+        replayHeader = (std::string)(char*)buffer;
+        MessageBox(NULL, L"Writing...", L"Info", MB_ICONEXCLAMATION | MB_OK);
+        MessageBox(NULL, (LPCWSTR)replayHeader.c_str(), L"replayHeader", MB_ICONEXCLAMATION | MB_OK);
+        replayHeaderSize = elementSize;
+    }
+    return ra3_fwrite(buffer,elementSize,elementCount,file);
+}
+
+int new_fclose(FILE* file)
+{
+    if (file == replayFile)
+    {
+        replayFile = NULL;
+        //ToDo : Remove this....
+        MessageBox(NULL, (LPCWSTR)replayHeader.c_str(), L"Info", MB_ICONEXCLAMATION | MB_OK);
+    }
+    return ra3_fclose(file);
 }

@@ -43,6 +43,7 @@ long new_ftell(FILE* file);
 FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode);
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file);
 int new_fclose(FILE* file);
+void AnalyseString();
 
 auto ra3_ftell = static_cast<decltype(&ftell)>(nullptr);
 auto ra3_fflush = static_cast<decltype(&fflush)>(nullptr);
@@ -51,8 +52,10 @@ auto ra3_fwrite = static_cast<decltype(&fwrite)>(nullptr);
 auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
 
 FILE* replayFile;
-std::string replayHeader;
-size_t replayHeaderSize;
+std::string replayData;
+size_t replayDataSize = 0;
+//target output
+std::string replaySaver;
 
 auto mutex = std::mutex{};
 auto output = std::ofstream{};
@@ -347,13 +350,11 @@ __declspec(naked) void newLuaSetGlobal()
 
 long new_ftell(FILE* file)
 {
+    ra3_fflush(file);
     if (file == replayFile)
     {
-        replayFile = NULL;
-        //ToDo : Remove this....
-        MessageBox(NULL, (LPCWSTR)replayHeader.c_str(), L"replayHeader", MB_ICONEXCLAMATION | MB_OK);
+        AnalyseString();
     }
-    //ToDo : Analyse
     return ra3_ftell(file);
 }
 
@@ -361,7 +362,6 @@ FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
 {
     std::wstring wFileName = fileName;
     std::wstring wMode = mode;
-    //std::transform(begin(wFileName), end(wFileName), begin(wFileName), std::toupper);
     if (wFileName.ends_with(L".RA3Replay") && wMode == L"wb+")
     {
         //ToDo : Remove this messageBox after testing.
@@ -377,9 +377,9 @@ size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, F
 {
     if (file == replayFile)
     {
-        //game is writing replays!
-        replayHeader = (std::string)(char*)buffer;
-        replayHeaderSize = elementSize;
+        //game is writing replay file , expand replayHeader.
+        replayDataSize += elementSize;
+        replayData.append((std::string)(char*)buffer);
     }
     return ra3_fwrite(buffer,elementSize,elementCount,file);
 }
@@ -388,9 +388,13 @@ int new_fclose(FILE* file)
 {
     if (file == replayFile)
     {
-        replayFile = NULL;
-        //ToDo : Remove this....
-        MessageBox(NULL, (LPCWSTR)replayHeader.c_str(), L"Info", MB_ICONEXCLAMATION | MB_OK);
+        AnalyseString();
     }
     return ra3_fclose(file);
+}
+
+void AnalyseString()
+{
+    replayFile = NULL;
+    MessageBox(NULL,L"Analysing replayData....", L"replayData", MB_ICONEXCLAMATION | MB_OK);
 }

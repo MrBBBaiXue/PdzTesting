@@ -60,6 +60,8 @@ size_t replayDataSize = 0;
 //target
 std::atomic<int> currentPlayerInLua;
 //从 0 到 5 ， 出错为 -1
+
+
 auto mutex = std::mutex{};
 auto output = std::ofstream{};
 
@@ -294,6 +296,7 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
 
         auto const getCurrentPlayer = [](lua_State* L)
         {
+            
             lua_pushnumber(L,currentPlayerInLua);
             return 1;
         };
@@ -365,7 +368,9 @@ long new_ftell(FILE* file)
     ra3_fflush(file);
     if (file == replayFile)
     {
+        replayFile = NULL;
         AnalyseReplayData();
+        
     }
     return ra3_ftell(file);
 }
@@ -400,13 +405,13 @@ int new_fclose(FILE* file)
     if (file == replayFile)
     {
         currentPlayerInLua = 0;
+        replayFile = NULL;
     }
     return ra3_fclose(file);
 }
 
 void AnalyseReplayData()
 {
-    replayFile = NULL;
     auto replayDataStartPos = replayData.find(";S=H");
     if (replayDataStartPos == replayData.npos)
     {
@@ -421,7 +426,7 @@ void AnalyseReplayData()
     }
 
     auto replaySaver = replayData.at(replayDataEndPos + 1);
-
+    
     auto playersDataStartPos = replayDataStartPos + 3;
     auto playersDataLength = replayDataEndPos - playersDataStartPos;
     auto playersData = replayData.substr(playersDataStartPos, playersDataLength);
@@ -433,15 +438,16 @@ int AnalyseCurrentPlayerInLua(const std::string& replayData, int replaySaver)
 {
     try
     {
+        
         std::vector<std::string> players;
         boost::split(players, replayData, boost::is_any_of(":"));
         std::vector<int> playerOrders(players.size());
         playerOrders.resize(players.size(), 6);
         int playerOrder = 0;
-
+        
         for (size_t n = 0; n < players.size(); n++)
         {
-            if (players[n].substr(0, 1) == "H")
+            if (players[n].substr(0,1) == "H")
             {
                 std::vector<std::string> factions;
                 boost::split(factions, players[n], boost::is_any_of(","));
@@ -450,13 +456,16 @@ int AnalyseCurrentPlayerInLua(const std::string& replayData, int replaySaver)
                     continue;
                 }
             }
-            else if (players[n].substr(0, 1) == "X" or ";")
+            else if (players[n].substr(0, 1) == "X")
             {
                 continue;
             }
+
             playerOrders[n] = playerOrder;
             playerOrder++;
+
         }
+
         return playerOrders[replaySaver];
     }
     catch (const std::exception& e)

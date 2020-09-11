@@ -3,9 +3,11 @@
 #include "FunctionFinder.hpp"
 #include <fstream>
 #include <mutex>
+#include <boost/algorithm/string.hpp>
 extern "C"
 {
 #include <Lua/include/lua.h>
+#include <iostream>
 }
 
 extern "C" { FILE __iob_func[3] = { *stdin,*stdout,*stderr }; }
@@ -43,7 +45,9 @@ long new_ftell(FILE* file);
 FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode);
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file);
 int new_fclose(FILE* file);
-void AnalyseString();
+void AnalyseReplayData();
+int AnalysePlayers(std::vector<std::string>& players, int pos);
+int GetReplaySaver(std::string string);
 
 auto ra3_ftell = static_cast<decltype(&ftell)>(nullptr);
 auto ra3_fflush = static_cast<decltype(&fflush)>(nullptr);
@@ -54,8 +58,9 @@ auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
 FILE* replayFile;
 std::string replayData;
 size_t replayDataSize = 0;
-//target output
-std::string replaySaver;
+//target
+//从 0 到 5，默认(如果尝试获得X或者commentator)为6，出错/重置为0
+int currentPlayerInLua = 0;
 
 auto mutex = std::mutex{};
 auto output = std::ofstream{};
@@ -287,9 +292,16 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
             //ToDo : analyse lua script not running...
             //return 0;
         };
+
+        auto const getCurrentPlayer = [](lua_State* L)
+        {
+            return currentPlayerInLua;
+        };
         
         static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, messageBox, 0);
         static_cast<decltype(&lua_setglobal)>(originalLuaSetGlobal)(luaState, "MessageBox");
+        static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, getCurrentPlayer, 0);
+        static_cast<decltype(&lua_setglobal)>(originalLuaSetGlobal)(luaState, "getCurrentPlayer");
     }
 }
 
@@ -353,7 +365,7 @@ long new_ftell(FILE* file)
     ra3_fflush(file);
     if (file == replayFile)
     {
-        AnalyseString();
+        AnalyseReplayData();
     }
     return ra3_ftell(file);
 }
@@ -365,7 +377,7 @@ FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
     if (wFileName.ends_with(L".RA3Replay") && wMode == L"wb+")
     {
         //ToDo : Remove this messageBox after testing.
-        MessageBox(NULL, L"Get RA3Replay opening!", L"Info", MB_ICONEXCLAMATION | MB_OK);
+        //MessageBox(NULL, L"Get RA3Replay opening!", L"Info", MB_ICONEXCLAMATION | MB_OK);
         FILE* file = ra3__wfopen(fileName, mode);
         replayFile = file;
         return file;
@@ -378,8 +390,8 @@ size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, F
     if (file == replayFile)
     {
         //game is writing replay file , expand replayHeader.
-        replayDataSize += elementSize;
-        replayData.append((std::string)(char*)buffer);
+        replayDataSize += elementSize * elementCount / sizeof(char);
+        replayData.append(reinterpret_cast<const char*>(buffer), elementSize * elementCount / sizeof(char));
     }
     return ra3_fwrite(buffer,elementSize,elementCount,file);
 }
@@ -388,13 +400,100 @@ int new_fclose(FILE* file)
 {
     if (file == replayFile)
     {
-        AnalyseString();
+        currentPlayerInLua = 0;
     }
     return ra3_fclose(file);
 }
 
-void AnalyseString()
+void AnalyseReplayData()
 {
     replayFile = NULL;
-    MessageBox(NULL,L"Analysing replayData....", L"replayData", MB_ICONEXCLAMATION | MB_OK);
+    auto replaySaver = GetReplaySaver(replayData);
+    auto playerDataStartPos = replayData.find(";S=") + 3;
+    auto playerDataEndPos = replayData.rfind(":;") + 1;
+    auto playerData = replayData.substr(playerDataStartPos, playerDataEndPos - playerDataStartPos);
+    std::vector<std::string> players;
+    boost::split(players, playerData, boost::is_any_of(":"));
+    currentPlayerInLua = AnalysePlayers(players, replaySaver);
+    //MessageBox for test use.
+    std::string test1 = std::to_string(currentPlayerInLua);
+    MessageBoxA(NULL, test1.c_str(), "Info", MB_ICONEXCLAMATION | MB_OK);
 }
+
+int AnalysePlayers(std::vector<std::string>& players, int pos)
+{
+    int playerOrders[6] = { 6,6,6,6,6,6 };
+    int playerOrder = 0;
+    for (size_t n = 0; n < 6; n++)
+    {
+        if (players[n].substr(0, 1) == "H")
+        {
+            std::vector<std::string> factions;
+            boost::split(factions, players[n], boost::is_any_of(","));
+            if (factions[5] == "1" || factions[5] == "3")
+            {
+                continue;
+            }
+            else
+            {
+                playerOrders[n] = playerOrder;
+                playerOrder++;
+            }
+        }
+        else if (players[n].substr(0, 1) == "C")
+        {
+            playerOrders[n] = playerOrder;
+            playerOrder++;
+        }
+        else if (players[n].substr(0, 1) == "X")
+        {
+            continue;
+        }
+
+    }
+    return playerOrders[pos];
+}
+
+int GetReplaySaver(std::string replayData)
+{
+    auto endPos = replayData.find(":;") + 2;
+    auto replaySaver = replayData.at(endPos);
+    //char replayChar[2];
+    //strcpy_s(replayChar,replaySaver.c_str());
+    //
+
+    try
+    {
+        //要怎么把 string "\x0" 转为 int 0 呢？
+        //没时间了，暂时先这么写吧...
+        if (replaySaver == "\0" or "")
+        {
+            return 0;
+        }
+        else if (replaySaver == "\x1")
+        {
+            return 1;
+        }
+        else if (replaySaver == "\x2")
+        {
+            return 2;
+        }
+        else if (replaySaver == "\x3")
+        {
+            return 3;
+        }
+        else if (replaySaver == "\x4")
+        {
+            return 4;
+        }
+        else if (replaySaver == "\x5")
+        {
+            return 5;
+        }
+    }
+    catch (std::exception e)
+    {
+        return 0;
+    }
+}
+

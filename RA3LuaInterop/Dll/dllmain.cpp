@@ -276,24 +276,26 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
             }
 
             auto const length = lua_strlen(L, 1);
-            //static auto yes = true;
+            static auto yes = true;
             //if (not yes)
             //{
             //    return 0;
             //}
-            //if (
-            MessageBoxA(nullptr, pointer, "From Lua", MB_YESNO);
-                    //!= IDYES)
-            //{
-            //    yes = false;
-            //}
+            if (
+            MessageBoxA(nullptr, pointer, "From Lua", MB_YESNO)
+                    != IDYES)
+            {
+                return 0;
+                //yes = false;
+            }
             //ToDo : analyse lua script not running...
-            //return 0;
+
         };
 
         auto const getCurrentPlayer = [](lua_State* L)
         {
-            return currentPlayerInLua;
+            lua_pushnumber(L,currentPlayerInLua);
+            return 1;
         };
         
         static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, messageBox, 0);
@@ -374,6 +376,7 @@ FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
     std::wstring wMode = mode;
     if (wFileName.ends_with(L".RA3Replay") && wMode == L"wb+")
     {
+        currentPlayerInLua = -1;
         FILE* file = ra3__wfopen(fileName, mode);
         replayFile = file;
         return file;

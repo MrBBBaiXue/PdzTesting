@@ -7,31 +7,34 @@
 #include <filesystem>
 
 int AnalyseCurrentPlayerInLua(const std::string& replayData, int pos);
-int GetReplaySaver(const std::string& replayData);
 
-void main()
+int main()
 {
     //Read
     std::ifstream input;
-    auto const fileString = "exampleReplay-1.dat";
+    auto const fileString = "exampleReplay-0.dat";
     std::ifstream ifs(fileString);
 
     std::string replayData((std::istreambuf_iterator<char>(ifs)),
                              (std::istreambuf_iterator<char>()));
-    auto replayDataStartPos = replayData.find(";S=") + 3;
+    auto replayDataStartPos = replayData.find(";S=H");
     if (replayDataStartPos == replayData.npos)
     {
-        return;
+        return -1;
     }
-    auto replayDataEndPos = replayData.rfind(":;") + 3;
+    auto replayDataEndPos = replayData.find(";",replayDataStartPos + 1);
     if (replayDataEndPos == replayData.npos)
     {
-        return;
+        return -1;
     }
-    replayData = replayData.substr(replayDataStartPos, replayDataEndPos - replayDataStartPos);
 
-    auto replaySaver = GetReplaySaver(replayData);
-    auto currentPlayerInLua = AnalyseCurrentPlayerInLua(replayData,replaySaver);
+    auto replaySaver = replayData.at(replayDataEndPos + 1);
+
+    auto playersDataStartPos = replayDataStartPos + 3;
+    auto playersDataLength = replayDataEndPos - playersDataStartPos;
+    auto playersData = replayData.substr(playersDataStartPos, playersDataLength);
+
+    auto currentPlayerInLua = AnalyseCurrentPlayerInLua(playersData,replaySaver);
 
     std::cout << "Result : " <<  currentPlayerInLua << std::endl;
 }
@@ -40,6 +43,7 @@ int AnalyseCurrentPlayerInLua(const std::string& replayData ,int replaySaver)
 {
     try
     {
+
         std::vector<std::string> players;
         boost::split(players, replayData, boost::is_any_of(":"));
         std::vector<int> playerOrders(players.size());
@@ -66,23 +70,9 @@ int AnalyseCurrentPlayerInLua(const std::string& replayData ,int replaySaver)
         }
         return playerOrders[replaySaver];
     }
-    catch (std::exception e)
+    catch (const std::exception& e)
     {
         return -1;
     }
 }
 
-int GetReplaySaver(const std::string& replayData)
-{
-    auto endPos = replayData.rfind(":;") + 2;
-    auto replaySaver = replayData.at(endPos);
-
-    try
-    {
-        return replaySaver;
-    }
-    catch (std::exception e)
-    {
-        return -1;
-    }
-}

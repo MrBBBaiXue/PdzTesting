@@ -58,7 +58,7 @@ FILE* replayFile;
 std::string replayData;
 size_t replayDataSize = 0;
 //target
-int currentPlayerInLua;
+std::atomic<int> currentPlayerInLua;
 //从 0 到 5 ， 出错为 -1
 auto mutex = std::mutex{};
 auto output = std::ofstream{};

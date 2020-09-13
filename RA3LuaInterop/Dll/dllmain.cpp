@@ -1,4 +1,4 @@
-// dllmain.cpp : Defines the entry point for the DLL application.
+ï»¿// dllmain.cpp : Defines the entry point for the DLL application.
 #include "pch.h"
 #include "FunctionFinder.hpp"
 #include <fstream>
@@ -39,8 +39,13 @@ auto originalLuaBindingsSetter = static_cast<void*>(nullptr);
 auto originalLuaVCClosure = static_cast<void*>(nullptr);
 auto originalLuaSetGlobal = static_cast<void*>(nullptr);
 
+auto const showMessage = [](auto&&... args)
+{
+    auto const message = (std::stringstream{} << ... << args).str();
+    MessageBoxA(nullptr, message.c_str(), nullptr, MB_OK);
+};
+
 //Edited Hooking functions
-HMODULE vc2005;
 long new_ftell(FILE* file);
 FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode);
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file);
@@ -56,10 +61,9 @@ auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
 
 FILE* replayFile;
 std::string replayData;
-size_t replayDataSize = 0;
 //target
 std::atomic<int> currentPlayerInLua;
-//´Ó 0 µ½ 5 £¬ ³ö´íÎª -1
+//ä»Ž 0 åˆ° 5 ï¼Œ å‡ºé”™ä¸º -1
 
 
 auto mutex = std::mutex{};
@@ -102,7 +106,7 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
         printLine("trying to find lua bindings setter");
         originalLuaBindingsSetter = finder.find
         (
-            luaBindingsSetter.data(), 
+            luaBindingsSetter.data(),
             luaBindingsSetter.data() + luaBindingsSetter.size()
         );
         printLine("trying to find luaV_Cclosure");
@@ -117,14 +121,14 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
             luaSetGlobal.data(),
             luaSetGlobal.data() + luaSetGlobal.size()
         );
-        
+
 
         printLine("installing ra3 lua setter hook");
         installHook(originalLuaBindingsSetter, newLuaBindingsSetter);
         printLine("installing lua set global hook");
         installHook(originalLuaSetGlobal, newLuaSetGlobal);
         printLine("installing hook functions....");
-        vc2005 = GetModuleHandleW(L"MSVCR80.dll");
+        auto const vc2005 = GetModuleHandleW(L"MSVCR80.dll");
         if (vc2005 == NULL)
         {
             printLine("HMODULE vc2005 not found!");
@@ -187,10 +191,10 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
 
 bool DLL_API injectDll
 (
-    ULONG const targetProcessId, 
-    void const* const data, 
-    std::size_t const size, 
-    char* const messageBuffer, 
+    ULONG const targetProcessId,
+    void const* const data,
+    std::size_t const size,
+    char* const messageBuffer,
     std::size_t* const bufferSize
 ) noexcept
 {
@@ -208,8 +212,8 @@ bool DLL_API injectDll
     auto const result = RhInjectLibrary
     (
         targetProcessId, // target pid
-        0, 
-        EASYHOOK_INJECT_DEFAULT, 
+        0,
+        EASYHOOK_INJECT_DEFAULT,
         selfPath.data(), // path of self
         nullptr, // no x64 dll
         copy.data(), // no custom data
@@ -222,7 +226,7 @@ bool DLL_API injectDll
             ? why.size()
             : *bufferSize - 1;
         std::copy_n(begin(why), *bufferSize, messageBuffer);
-        
+
         return false;
     }
     return true;
@@ -263,7 +267,7 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
     {
         auto const messageBox = [](lua_State* L)
         {
-            
+
             auto const numberOfArguments = lua_gettop(L);
             if (numberOfArguments < 1)
             {
@@ -278,29 +282,18 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
             }
 
             auto const length = lua_strlen(L, 1);
-            static auto yes = true;
-            //if (not yes)
-            //{
-            //    return 0;
-            //}
-            if (
-            MessageBoxA(nullptr, pointer, "From Lua", MB_YESNO)
-                    != IDYES)
-            {
-                return 0;
-                //yes = false;
-            }
-            //ToDo : analyse lua script not running...
-
+            auto const string = std::string{ pointer, length };
+            MessageBoxA(nullptr, string.c_str(), "From Lua", MB_OK);
+            return 0;
         };
 
         auto const getCurrentPlayer = [](lua_State* L)
         {
-            
-            lua_pushnumber(L,currentPlayerInLua);
+            showMessage("getCurrentPlayer called, thread id = ", GetCurrentThreadId());
+            lua_pushnumber(L, currentPlayerInLua);
             return 1;
         };
-        
+
         static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, messageBox, 0);
         static_cast<decltype(&lua_setglobal)>(originalLuaSetGlobal)(luaState, "MessageBox");
         static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, getCurrentPlayer, 0);
@@ -338,12 +331,12 @@ __declspec(naked) void newLuaBindingsSetter()
 
 __declspec(naked) void newLuaSetGlobal()
 {
-    __asm 
+    __asm
     {
         push ebp;
         mov ebp, esp;
         push eax;
-        
+
         push ecx;
         push edx;
 
@@ -358,54 +351,68 @@ __declspec(naked) void newLuaSetGlobal()
 
         pop eax;
         pop ebp;
-        
+
         jmp originalLuaSetGlobal;
     }
 }
 
 long new_ftell(FILE* file)
 {
-    ra3_fflush(file);
     if (file == replayFile)
     {
-        replayFile = NULL;
-        AnalyseReplayData();
-        
+        ra3_fflush(file);
+        try
+        {
+            showMessage("ftell called on replay file, thread id = ", GetCurrentThreadId());
+            replayFile = nullptr;
+            AnalyseReplayData();
+        }
+        catch (...)
+        {
+            MessageBoxA(nullptr, "exception", nullptr, MB_OK);
+        }
     }
     return ra3_ftell(file);
 }
 
 FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
 {
-    std::wstring wFileName = fileName;
-    std::wstring wMode = mode;
+    auto const wFileName = std::wstring_view{ fileName };
+    auto const wMode = std::wstring_view{ mode };
+    auto const file = ra3__wfopen(fileName, mode);
     if (wFileName.ends_with(L".RA3Replay") && wMode == L"wb+")
     {
-        currentPlayerInLua = -1;
-        FILE* file = ra3__wfopen(fileName, mode);
         replayFile = file;
-        return file;
+        replayData.clear();
+        currentPlayerInLua = -1;
     }
-    return ra3__wfopen(fileName,mode);
+    return file;
 }
 
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file)
 {
     if (file == replayFile)
     {
-        //game is writing replay file , append replayHeader.
-        replayDataSize += elementSize * elementCount / sizeof(char);
-        replayData.append(reinterpret_cast<const char*>(buffer), elementSize * elementCount / sizeof(char));
+        try
+        {
+            //game is writing replay file , append replayHeader.
+            replayData.append(static_cast<const char*>(buffer), elementSize * elementCount);
+        }
+        catch (...)
+        {
+            MessageBoxA(nullptr, "failed to append replay data", nullptr, MB_OK);
+        }
     }
-    return ra3_fwrite(buffer,elementSize,elementCount,file);
+    return ra3_fwrite(buffer, elementSize, elementCount, file);
 }
 
 int new_fclose(FILE* file)
 {
     if (file == replayFile)
     {
-        currentPlayerInLua = 0;
-        replayFile = NULL;
+        replayFile = nullptr;
+        replayData.clear();
+        currentPlayerInLua = -1;
     }
     return ra3_fclose(file);
 }
@@ -426,7 +433,7 @@ void AnalyseReplayData()
     }
 
     auto replaySaver = replayData.at(replayDataEndPos + 1);
-    
+
     auto playersDataStartPos = replayDataStartPos + 3;
     auto playersDataLength = replayDataEndPos - playersDataStartPos;
     auto playersData = replayData.substr(playersDataStartPos, playersDataLength);
@@ -438,16 +445,16 @@ int AnalyseCurrentPlayerInLua(const std::string& replayData, int replaySaver)
 {
     try
     {
-        
+
         std::vector<std::string> players;
         boost::split(players, replayData, boost::is_any_of(":"));
         std::vector<int> playerOrders(players.size());
         playerOrders.resize(players.size(), 6);
         int playerOrder = 0;
-        
+
         for (size_t n = 0; n < players.size(); n++)
         {
-            if (players[n].substr(0,1) == "H")
+            if (players[n].substr(0, 1) == "H")
             {
                 std::vector<std::string> factions;
                 boost::split(factions, players[n], boost::is_any_of(","));

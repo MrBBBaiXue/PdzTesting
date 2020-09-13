@@ -50,8 +50,8 @@ long new_ftell(FILE* file);
 FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode);
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file);
 int new_fclose(FILE* file);
-void AnalyseReplayData();
-int AnalyseCurrentPlayerInLua(const std::string& replayData, int replaySaver);
+void AnalyseReplayData(std::string_view const replayData);
+int AnalyseCurrentPlayerInLua(std::string_view const replayData, int replaySaver);
 
 auto ra3_ftell = static_cast<decltype(&ftell)>(nullptr);
 auto ra3_fflush = static_cast<decltype(&fflush)>(nullptr);
@@ -62,7 +62,7 @@ auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
 FILE* replayFile;
 std::string replayData;
 //target
-std::atomic<int> currentPlayerInLua;
+std::atomic<int> currentPlayerInLua(-1);
 //从 0 到 5 ， 出错为 -1
 
 
@@ -289,7 +289,6 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
 
         auto const getCurrentPlayer = [](lua_State* L)
         {
-            showMessage("getCurrentPlayer called, thread id = ", GetCurrentThreadId());
             lua_pushnumber(L, currentPlayerInLua);
             return 1;
         };
@@ -363,9 +362,9 @@ long new_ftell(FILE* file)
         ra3_fflush(file);
         try
         {
-            showMessage("ftell called on replay file, thread id = ", GetCurrentThreadId());
             replayFile = nullptr;
-            AnalyseReplayData();
+            AnalyseReplayData(replayData);
+            replayData.clear();
         }
         catch (...)
         {
@@ -417,7 +416,7 @@ int new_fclose(FILE* file)
     return ra3_fclose(file);
 }
 
-void AnalyseReplayData()
+void AnalyseReplayData(std::string_view const replayData)
 {
     auto replayDataStartPos = replayData.find(";S=H");
     if (replayDataStartPos == replayData.npos)
@@ -441,41 +440,40 @@ void AnalyseReplayData()
     currentPlayerInLua = AnalyseCurrentPlayerInLua(playersData, replaySaver);
 }
 
-int AnalyseCurrentPlayerInLua(const std::string& replayData, int replaySaver)
+int AnalyseCurrentPlayerInLua(std::string_view const replayData, int replaySaver)
 {
     try
     {
-
         std::vector<std::string> players;
         boost::split(players, replayData, boost::is_any_of(":"));
         std::vector<int> playerOrders(players.size());
-        playerOrders.resize(players.size(), 6);
+        playerOrders.resize(players.size(), -1);
         int playerOrder = 0;
 
         for (size_t n = 0; n < players.size(); n++)
         {
-            if (players[n].substr(0, 1) == "H")
+            if (players.at(n).at(1) == 'H')
             {
                 std::vector<std::string> factions;
                 boost::split(factions, players[n], boost::is_any_of(","));
-                if (factions[5] == "1" || factions[5] == "3")
+                if (factions.at(5) == "1" || factions.at(5) == "3")
                 {
                     continue;
                 }
             }
-            else if (players[n].substr(0, 1) == "X")
+            else if (players[n].at(1) == 'X')
             {
                 continue;
             }
 
-            playerOrders[n] = playerOrder;
+            playerOrders.at(n) = playerOrder;
             playerOrder++;
 
         }
 
-        return playerOrders[replaySaver];
+        return playerOrders.at(replaySaver);
     }
-    catch (const std::exception& e)
+    catch (...)
     {
         return -1;
     }

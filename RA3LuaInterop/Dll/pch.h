@@ -11,7 +11,7 @@
 #include "framework.h"
 #include <boost/dll/runtime_symbol_info.hpp>
 #include <boost/locale/encoding_utf.hpp>
-#include <easyhook.h>
+#include <easyhook/easyhook.h>
 #include <Windows.h>
 #include <algorithm>
 #include <array>

@@ -1,4 +1,4 @@
-// dllmain.cpp : Defines the entry point for the DLL application.
+ï»¿// dllmain.cpp : Defines the entry point for the DLL application.
 #include "pch.h"
 #include "FunctionFinder.hpp"
 #include <fstream>
@@ -29,8 +29,9 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     return TRUE;
 }
 
-void installHook(void* const original, void* const newFunction);
-void __stdcall printLine(char const* const what);
+template<typename T>
+void installHook(T* const original, T* const newFunction);
+void __stdcall printL(char const* const what);
 void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const name);
 
 void newLuaBindingsSetter();
@@ -39,14 +40,19 @@ auto originalLuaBindingsSetter = static_cast<void*>(nullptr);
 auto originalLuaVCClosure = static_cast<void*>(nullptr);
 auto originalLuaSetGlobal = static_cast<void*>(nullptr);
 
+auto const showMessage = [](auto&&... args)
+{
+    auto const message = (std::stringstream{} << ... << args).str();
+    MessageBoxA(nullptr, message.c_str(), nullptr, MB_OK);
+};
+
 //Edited Hooking functions
-HMODULE vc2005;
 long new_ftell(FILE* file);
 FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode);
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file);
 int new_fclose(FILE* file);
-void AnalyseReplayData();
-int AnalyseCurrentPlayerInLua(const std::string& replayData, int replaySaver);
+void AnalyseReplayData(std::string_view const replayData);
+int AnalyseCurrentPlayerInLua(std::string_view const replayData, int replaySaver);
 
 auto ra3_ftell = static_cast<decltype(&ftell)>(nullptr);
 auto ra3_fflush = static_cast<decltype(&fflush)>(nullptr);
@@ -55,15 +61,25 @@ auto ra3_fwrite = static_cast<decltype(&fwrite)>(nullptr);
 auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
 
 FILE* replayFile;
+FILE* fwriteFile;
 std::string replayData;
-size_t replayDataSize = 0;
 //target
-std::atomic<int> currentPlayerInLua;
-//´Ó 0 µ½ 5 £¬ ³ö´íÎª -1
+std::atomic<int> currentPlayerInLua(-1);
+//ä»Ž 0 åˆ° 5 ï¼Œ å‡ºé”™ä¸º -1
 
 
 auto mutex = std::mutex{};
 auto output = std::ofstream{};
+std::ostream& operator<<(std::ostream& os, std::wstring_view const view)
+{
+    using boost::locale::conv::utf_to_utf;
+    return os << utf_to_utf<char>(view.data(), view.data() + view.size());
+}
+auto const print = [](auto&&... stuffs)
+{
+    auto const lock = std::scoped_lock{ mutex };
+    (output << ... << stuffs) << std::endl;
+};
 
 auto const startLuaBindingLiteral = "start lua binding";
 auto const endLuaBindingLiteral = "end lua binding";
@@ -99,80 +115,67 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
 
         auto const finder = FunctionFinder{};
 
-        printLine("trying to find lua bindings setter");
+        printL("trying to find lua bindings setter");
         originalLuaBindingsSetter = finder.find
         (
-            luaBindingsSetter.data(), 
+            luaBindingsSetter.data(),
             luaBindingsSetter.data() + luaBindingsSetter.size()
         );
-        printLine("trying to find luaV_Cclosure");
+        printL("trying to find luaV_Cclosure");
         originalLuaVCClosure = finder.find
         (
             luaVCClosure.data(),
             luaVCClosure.data() + luaVCClosure.size()
         );
-        printLine("trying to find lua_setglobal");
+        printL("trying to find lua_setglobal");
         originalLuaSetGlobal = finder.find
         (
             luaSetGlobal.data(),
             luaSetGlobal.data() + luaSetGlobal.size()
         );
-        
 
-        printLine("installing ra3 lua setter hook");
-        installHook(originalLuaBindingsSetter, newLuaBindingsSetter);
-        printLine("installing lua set global hook");
-        installHook(originalLuaSetGlobal, newLuaSetGlobal);
-        printLine("installing hook functions....");
-        vc2005 = GetModuleHandleW(L"MSVCR80.dll");
+
+        printL("installing ra3 lua setter hook");
+        installHook<void>(originalLuaBindingsSetter, newLuaBindingsSetter);
+        printL("installing lua set global hook");
+        installHook<void>(originalLuaSetGlobal, newLuaSetGlobal);
+        printL("installing hook functions....");
+        auto const vc2005 = GetModuleHandleW(L"MSVCR80.dll");
         if (vc2005 == NULL)
         {
-            printLine("HMODULE vc2005 not found!");
+            printL("HMODULE vc2005 not found!");
             return;
         }
-        //
-        ra3_ftell = reinterpret_cast<decltype(&ftell)>(GetProcAddress(vc2005, "ftell"));
-        if (ra3_ftell == NULL)
+        auto const getVC2005Function = [vc2005](auto* prototype, char const* name)
         {
-            printLine("ra3_ftell not found!");
-            return;
-        }
-        ra3_fflush = reinterpret_cast<decltype(&fflush)>(GetProcAddress(vc2005, "fflush"));
-        if (ra3_fflush == NULL)
-        {
-            printLine("ra3_fflush not found!");
-            return;
-        }
-        ra3__wfopen = reinterpret_cast<decltype(&_wfopen)>(GetProcAddress(vc2005, "_wfopen"));
-        if (ra3__wfopen == NULL)
-        {
-            printLine("ra3__wfopen not found!");
-            return;
-        }
-        ra3_fwrite = reinterpret_cast<decltype(&fwrite)>(GetProcAddress(vc2005, "fwrite"));
-        if (ra3_fwrite == NULL)
-        {
-            printLine("ra3_fwrite not found!");
-            return;
-        }
-        ra3_fclose = reinterpret_cast<decltype(&fclose)>(GetProcAddress(vc2005, "fclose"));
-        if (ra3_fclose == NULL)
-        {
-            printLine("ra3_fclose not found!");
-            return;
-        }
+            auto const result = reinterpret_cast<decltype(prototype)>(GetProcAddress(vc2005, name));
+            if (result == nullptr)
+            {
+                MessageBoxA(nullptr, name, "Failed to get address of", MB_ICONERROR);
+                exit(1);
+            }
+            return result;
+        };
+#define GET_FROM_VC2005(x) getVC2005Function(static_cast<decltype(&x)>(nullptr), #x)
+        ra3_ftell = GET_FROM_VC2005(ftell);
+        ra3_fflush = GET_FROM_VC2005(fflush);
+        ra3__wfopen = GET_FROM_VC2005(_wfopen);
+        ra3_fwrite = GET_FROM_VC2005(fwrite);
+        ra3_fclose = GET_FROM_VC2005(fclose);
+
+#undef GET_FROM_VC2005
         //hooking...
         installHook(ra3_ftell, new_ftell);
         installHook(ra3__wfopen, new__wfopen);
         installHook(ra3_fwrite, new_fwrite);
         installHook(ra3_fclose, new_fclose);
-        //
+
         const auto processHeap = GetProcessHeap();
         if (processHeap == nullptr)
         {
             return;
         }
-        printLine("everything done.");
+        printL("everything done.");
     }
     catch (std::exception const& e)
     {
@@ -187,10 +190,10 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
 
 bool DLL_API injectDll
 (
-    ULONG const targetProcessId, 
-    void const* const data, 
-    std::size_t const size, 
-    char* const messageBuffer, 
+    ULONG const targetProcessId,
+    void const* const data,
+    std::size_t const size,
+    char* const messageBuffer,
     std::size_t* const bufferSize
 ) noexcept
 {
@@ -208,8 +211,8 @@ bool DLL_API injectDll
     auto const result = RhInjectLibrary
     (
         targetProcessId, // target pid
-        0, 
-        EASYHOOK_INJECT_DEFAULT, 
+        0,
+        EASYHOOK_INJECT_DEFAULT,
         selfPath.data(), // path of self
         nullptr, // no x64 dll
         copy.data(), // no custom data
@@ -222,13 +225,14 @@ bool DLL_API injectDll
             ? why.size()
             : *bufferSize - 1;
         std::copy_n(begin(why), *bufferSize, messageBuffer);
-        
+
         return false;
     }
     return true;
 }
 
-void installHook(void* const original, void* const newFunction)
+template<typename T>
+void installHook(T* const original, T* const newFunction)
 {
     using boost::locale::conv::utf_to_utf;
 
@@ -247,10 +251,9 @@ void installHook(void* const original, void* const newFunction)
         throw std::runtime_error{ why };
     }
 }
-void __stdcall printLine(char const* const what)
+void __stdcall printL(char const* const what)
 {
-    auto const lock = std::scoped_lock{ mutex };
-    output << what << std::endl;
+    print(what);
 }
 void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const name)
 {
@@ -263,7 +266,7 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
     {
         auto const messageBox = [](lua_State* L)
         {
-            
+
             auto const numberOfArguments = lua_gettop(L);
             if (numberOfArguments < 1)
             {
@@ -278,29 +281,19 @@ void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const 
             }
 
             auto const length = lua_strlen(L, 1);
-            static auto yes = true;
-            //if (not yes)
-            //{
-            //    return 0;
-            //}
-            if (
-            MessageBoxA(nullptr, pointer, "From Lua", MB_YESNO)
-                    != IDYES)
-            {
-                return 0;
-                //yes = false;
-            }
-            //ToDo : analyse lua script not running...
-
+            auto const string = std::string{ pointer, length };
+            MessageBoxA(nullptr, string.c_str(), "From Lua", MB_OK);
+            return 0;
         };
 
         auto const getCurrentPlayer = [](lua_State* L)
         {
-            
-            lua_pushnumber(L,currentPlayerInLua);
+            auto const value = currentPlayerInLua.load();
+            print("lua - getCurrentPlayer called on thread ", GetCurrentThreadId(), ", returning value ", value);
+            lua_pushnumber(L, value);
             return 1;
         };
-        
+
         static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, messageBox, 0);
         static_cast<decltype(&lua_setglobal)>(originalLuaSetGlobal)(luaState, "MessageBox");
         static_cast<decltype(&lua_pushcclosure)>(originalLuaVCClosure)(luaState, getCurrentPlayer, 0);
@@ -316,7 +309,7 @@ __declspec(naked) void newLuaBindingsSetter()
         push edx;
         push ecx;
         push startLuaBindingLiteral;
-        call printLine;
+        call printL;
         pop ecx;
         pop edx;
         pop eax;
@@ -327,7 +320,7 @@ __declspec(naked) void newLuaBindingsSetter()
         push edx;
         push ecx;
         push endLuaBindingLiteral;
-        call printLine;
+        call printL;
         pop ecx;
         pop edx;
         pop eax;
@@ -338,12 +331,12 @@ __declspec(naked) void newLuaBindingsSetter()
 
 __declspec(naked) void newLuaSetGlobal()
 {
-    __asm 
+    __asm
     {
         push ebp;
         mov ebp, esp;
         push eax;
-        
+
         push ecx;
         push edx;
 
@@ -358,118 +351,158 @@ __declspec(naked) void newLuaSetGlobal()
 
         pop eax;
         pop ebp;
-        
+
         jmp originalLuaSetGlobal;
     }
 }
 
 long new_ftell(FILE* file)
 {
-    ra3_fflush(file);
-    if (file == replayFile)
+    if (file == fwriteFile)
     {
-        replayFile = NULL;
-        AnalyseReplayData();
-        
+        ra3_fflush(file);
+        try
+        {
+            print("ftell() called on replay file on thread ", GetCurrentThreadId(), ", start analysing replay data...");
+            AnalyseReplayData(replayData);
+            printL("replay data analyzed, clearing global variable FILE* fwriteFile and std::string replayData");
+            fwriteFile = nullptr;
+            replayData.clear();
+        }
+        catch (...)
+        {
+            MessageBoxA(nullptr, "exception", nullptr, MB_OK);
+        }
     }
     return ra3_ftell(file);
 }
 
 FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
 {
-    std::wstring wFileName = fileName;
-    std::wstring wMode = mode;
+    auto const wFileName = std::wstring_view{ fileName };
+    auto const wMode = std::wstring_view{ mode };
+    auto const file = ra3__wfopen(fileName, mode);
     if (wFileName.ends_with(L".RA3Replay") && wMode == L"wb+")
     {
-        currentPlayerInLua = -1;
-        FILE* file = ra3__wfopen(fileName, mode);
+        print("replay created with name {", wFileName, "} and mode {", wMode, "}, initializing global variables");
         replayFile = file;
-        return file;
+        fwriteFile = file;
+        replayData.clear();
+        currentPlayerInLua = -1;
     }
-    return ra3__wfopen(fileName,mode);
+    return file;
 }
 
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file)
 {
-    if (file == replayFile)
+    if (file == fwriteFile)
     {
-        //game is writing replay file , append replayHeader.
-        replayDataSize += elementSize * elementCount / sizeof(char);
-        replayData.append(reinterpret_cast<const char*>(buffer), elementSize * elementCount / sizeof(char));
+        try
+        {
+            //game is writing replay file , append replayHeader.
+            replayData.append(static_cast<const char*>(buffer), elementSize * elementCount);
+        }
+        catch (...)
+        {
+            MessageBoxA(nullptr, "failed to append replay data", nullptr, MB_OK);
+        }
     }
-    return ra3_fwrite(buffer,elementSize,elementCount,file);
+    return ra3_fwrite(buffer, elementSize, elementCount, file);
 }
 
 int new_fclose(FILE* file)
 {
     if (file == replayFile)
     {
-        currentPlayerInLua = 0;
-        replayFile = NULL;
+        printL("replay file is being closed, clearing global variables and currentPlayerInLua");
+        replayFile = nullptr;
+        fwriteFile = nullptr;
+        replayData.clear();
+        currentPlayerInLua = -1;
     }
     return ra3_fclose(file);
 }
 
-void AnalyseReplayData()
+void AnalyseReplayData(std::string_view const replayData)
 {
+    print("Analysing replay data {", replayData, "}");
     auto replayDataStartPos = replayData.find(";S=H");
     if (replayDataStartPos == replayData.npos)
     {
         currentPlayerInLua = -1;
+        printL("Unable to find player data start pos, -1");
         return;
     }
     auto replayDataEndPos = replayData.find(";", replayDataStartPos + 1);
     if (replayDataEndPos == replayData.npos)
     {
         currentPlayerInLua = -1;
+        printL("Unable to find player data end pos, -1");
         return;
     }
 
     auto replaySaver = replayData.at(replayDataEndPos + 1);
-    
+    print("Replay saver is ", +replaySaver);
+
     auto playersDataStartPos = replayDataStartPos + 3;
     auto playersDataLength = replayDataEndPos - playersDataStartPos;
     auto playersData = replayData.substr(playersDataStartPos, playersDataLength);
+    print("Player list obtained: {", playersData, "}");
 
     currentPlayerInLua = AnalyseCurrentPlayerInLua(playersData, replaySaver);
 }
 
-int AnalyseCurrentPlayerInLua(const std::string& replayData, int replaySaver)
+int AnalyseCurrentPlayerInLua(std::string_view const replayData, int replaySaver)
 {
     try
     {
-        
+        using namespace std::string_view_literals;
+        auto constexpr maxPlayers = 6;
+        auto constexpr observer = "1"sv;
+        auto constexpr commentator = "3"sv;
+
         std::vector<std::string> players;
         boost::split(players, replayData, boost::is_any_of(":"));
         std::vector<int> playerOrders(players.size());
-        playerOrders.resize(players.size(), 6);
+        playerOrders.resize(players.size(), -1);
         int playerOrder = 0;
-        
-        for (size_t n = 0; n < players.size(); n++)
+
+        for (size_t n = 0; n < maxPlayers; n++)
         {
-            if (players[n].substr(0,1) == "H")
+            print("checking player slot #", n, " = {", players.at(n), "}");
+            if (players.at(n).at(0) == 'H')
             {
                 std::vector<std::string> factions;
-                boost::split(factions, players[n], boost::is_any_of(","));
-                if (factions[5] == "1" || factions[5] == "3")
+                boost::split(factions, players.at(n), boost::is_any_of(","));
+                if (factions.at(5) == observer || factions.at(5) == commentator)
                 {
+                    print("player #", n, " {", players.at(n), "} is obs/commentator, skipping");
                     continue;
                 }
             }
-            else if (players[n].substr(0, 1) == "X")
+            else if (players.at(n).at(0) == 'X')
             {
+                print("player slot #", n, "is empty (X), skipping");
                 continue;
             }
 
-            playerOrders[n] = playerOrder;
+            print("player slot #", n, ", assigning playerOrder = ", playerOrder);
+            playerOrders.at(n) = playerOrder;
             playerOrder++;
 
         }
 
-        return playerOrders[replaySaver];
+        print("Current player = playerOrders.at(replaySaver = {", replaySaver, "}) = {", playerOrders.at(replaySaver), "}");
+        return playerOrders.at(replaySaver);
     }
-    catch (const std::exception& e)
+    catch (std::exception const& e)
     {
+        print("Exception when parsing replay data: ", e.what());
+        return -1;
+    }
+    catch (...)
+    {
+        print("Unknown exception when parsing replay data");
         return -1;
     }
 }

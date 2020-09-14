@@ -2,7 +2,7 @@
 //
 #include <Dll/framework.h>
 
-#include <easyhook.h>
+#include <easyhook/easyhook.h>
 #include <boost/locale.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 
@@ -15,16 +15,7 @@
 #include <iostream>
 #include <thread>
 
-extern "C" {
-#include <lua-4.0.1/include/lua.h>
-}
-#pragma comment(lib, "legacy_stdio_definitions.lib")
-extern "C" { FILE __iob_func[3] = { *stdin,*stdout,*stderr }; }
-#pragma comment(lib, "../lua-4.0.1/Debug/lua4.lib")
-
 bool inject();
-void printLuaFunction(std::string_view const name, void const* address);
-#define PRINT_LUA(name) printLuaFunction(#name, name)
 
 struct FunctionData
 {
@@ -32,7 +23,6 @@ struct FunctionData
     std::array<char, 16> name = { 0 };
     int offset;
 };
-auto checked = std::vector<FunctionData>{};
 
 int main()
 {
@@ -42,116 +32,6 @@ int main()
         SetConsoleOutputCP(CP_UTF8);
         // Enable buffering to prevent VS from chopping up UTF-8 byte sequences
         setvbuf(stdout, nullptr, _IOFBF, 1000);
-
-        /*
-        ** state manipulation
-        */
-        PRINT_LUA(lua_open);
-        PRINT_LUA(lua_close);
-
-
-        /*
-        ** basic stack manipulation
-        */
-        PRINT_LUA(lua_gettop);
-        PRINT_LUA(lua_settop);
-        PRINT_LUA(lua_pushvalue);
-        PRINT_LUA(lua_remove);
-        PRINT_LUA(lua_insert);
-        PRINT_LUA(lua_stackspace);
-
-
-        /*
-        ** access functions (stack -> C)
-        */
-
-        PRINT_LUA(lua_type);
-        PRINT_LUA(lua_typename);
-        PRINT_LUA(lua_isnumber);
-        PRINT_LUA(lua_isstring);
-        PRINT_LUA(lua_iscfunction);
-        PRINT_LUA(lua_tag);
-
-        PRINT_LUA(lua_equal);
-        PRINT_LUA(lua_lessthan);
-
-        PRINT_LUA(lua_tonumber);
-        PRINT_LUA(lua_tostring);
-        PRINT_LUA(lua_strlen);
-        PRINT_LUA(lua_tocfunction);
-        PRINT_LUA(lua_touserdata);
-        PRINT_LUA(lua_topointer);
-
-
-        /*
-        ** push functions (C -> stack)
-        */
-        PRINT_LUA(lua_pushnil);
-        PRINT_LUA(lua_pushnumber);
-        PRINT_LUA(lua_pushlstring);
-        PRINT_LUA(lua_pushstring);
-        PRINT_LUA(lua_pushcclosure);
-        PRINT_LUA(lua_pushusertag);
-
-
-        /*
-        ** get functions (Lua -> stack)
-        */
-        PRINT_LUA(lua_getglobal);
-        PRINT_LUA(lua_gettable);
-        PRINT_LUA(lua_rawget);
-        PRINT_LUA(lua_rawgeti);
-        PRINT_LUA(lua_getglobals);
-        PRINT_LUA(lua_gettagmethod);
-        PRINT_LUA(lua_getref);
-        PRINT_LUA(lua_newtable);
-
-
-        /*
-        ** set functions (stack -> Lua)
-        */
-        PRINT_LUA(lua_setglobal);
-        PRINT_LUA(lua_settable);
-        PRINT_LUA(lua_rawset);
-        PRINT_LUA(lua_rawseti);
-        PRINT_LUA(lua_setglobals);
-        PRINT_LUA(lua_settagmethod);
-        PRINT_LUA(lua_ref);
-
-
-        /*
-        ** "do" functions (run Lua code)
-        */
-        PRINT_LUA(lua_call);
-        PRINT_LUA(lua_rawcall);
-        PRINT_LUA(lua_dofile);
-        PRINT_LUA(lua_dostring);
-        PRINT_LUA(lua_dobuffer);
-
-        /*
-        ** Garbage-collection functions
-        */
-        PRINT_LUA(lua_getgcthreshold);
-        PRINT_LUA(lua_getgccount);
-        PRINT_LUA(lua_setgcthreshold);
-
-        /*
-        ** miscellaneous functions
-        */
-        PRINT_LUA(lua_newtag);
-        PRINT_LUA(lua_copytagmethods);
-        PRINT_LUA(lua_settag);
-
-        PRINT_LUA(lua_error);
-
-        PRINT_LUA(lua_unref);
-
-        PRINT_LUA(lua_next);
-        PRINT_LUA(lua_getn);
-
-        PRINT_LUA(lua_concat);
-
-        PRINT_LUA(lua_newuserdata);
 
         std::cout << "Will look for ra3_1.12.game..." << std::endl;
         while (true)
@@ -219,8 +99,8 @@ bool inject()
                 auto const injected = injectDll
                 (
                     entry.th32ProcessID, 
-                    checked.data(), 
-                    checked.size() * sizeof(*checked.data()), 
+                    nullptr, 
+                    0, 
                     message.data(), 
                     &size
                 );
@@ -236,42 +116,3 @@ bool inject()
     }
     return found;
 }
-
-void printLuaFunction(std::string_view const name, void const* address)
-{
-    
-    auto const function = static_cast<std::byte const*>(address);
-    auto needAttention = false;
-    auto output = std::ostringstream{};
-    for (int i = 0; i < 32; ++i)
-    {
-        output << std::hex << std::setw(2) << std::setfill('0') 
-            << static_cast<unsigned>(function[i]) << ' ';
-        auto const attention = std::string_view{ "\xC3\xCB\xC2\xCA\xCC" };
-        if (attention.find(static_cast<char>(function[i])) != attention.npos)
-        {
-            needAttention = true;
-        }
-    }
-    
-    if (needAttention)
-    {
-        std::cout << "Excluded " << name << " because too short " << std::endl;
-    }
-    else
-    {
-        auto const offset = (static_cast<std::byte const*>(address) - reinterpret_cast<std::byte const*>(&lua_setglobal));
-        std::cout << "offset to lua_setglobal: " << offset << std::endl;
-        auto& that = checked.emplace_back();
-        std::copy_n
-        (
-            static_cast<std::byte const*>(address),
-            32,
-            reinterpret_cast<std::byte*>(that.data.data())
-        );
-        std::copy_n(begin(name), (std::min<std::size_t>)(name.size(), 15), begin(that.name));
-        that.offset = offset;
-    }
-}
-
-

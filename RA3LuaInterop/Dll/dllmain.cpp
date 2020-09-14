@@ -29,7 +29,8 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     return TRUE;
 }
 
-void installHook(void* const original, void* const newFunction);
+template<typename T>
+void installHook(T* const original, T* const newFunction);
 void __stdcall printL(char const* const what);
 void __stdcall luaSetGlobalHandler(lua_State* const luaState, char const* const name);
 
@@ -58,6 +59,9 @@ auto ra3_fflush = static_cast<decltype(&fflush)>(nullptr);
 auto ra3__wfopen = static_cast<decltype(&_wfopen)>(nullptr);
 auto ra3_fwrite = static_cast<decltype(&fwrite)>(nullptr);
 auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
+
+auto ra3_mbstowcs = static_cast<decltype(&mbstowcs)>(nullptr);
+auto ra3__mbstowcs_l = static_cast<decltype(&_mbstowcs_l)>(nullptr);
 
 FILE* replayFile;
 std::string replayData;
@@ -134,9 +138,9 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
 
 
         printL("installing ra3 lua setter hook");
-        installHook(originalLuaBindingsSetter, newLuaBindingsSetter);
+        installHook<void>(originalLuaBindingsSetter, newLuaBindingsSetter);
         printL("installing lua set global hook");
-        installHook(originalLuaSetGlobal, newLuaSetGlobal);
+        installHook<void>(originalLuaSetGlobal, newLuaSetGlobal);
         printL("installing hook functions....");
         auto const vc2005 = GetModuleHandleW(L"MSVCR80.dll");
         if (vc2005 == NULL)
@@ -160,13 +164,45 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
         ra3__wfopen = GET_FROM_VC2005(_wfopen);
         ra3_fwrite = GET_FROM_VC2005(fwrite);
         ra3_fclose = GET_FROM_VC2005(fclose);
+        // utf8
+        ra3_mbstowcs = GET_FROM_VC2005(mbstowcs);
+        ra3__mbstowcs_l = GET_FROM_VC2005(_mbstowcs_l);
+
 #undef GET_FROM_VC2005
         //hooking...
         installHook(ra3_ftell, new_ftell);
         installHook(ra3__wfopen, new__wfopen);
         installHook(ra3_fwrite, new_fwrite);
         installHook(ra3_fclose, new_fclose);
-        
+        decltype(ra3_mbstowcs) new_ra3mbstowcs = [](wchar_t* dest, char const* src, size_t max)
+        {
+            auto const result = ra3_mbstowcs(dest, src, max);
+            if (result == -1)
+            {
+                print("mbstowcs - conversion of {", src, "} failed");
+            }
+            else
+            {
+                print("mbstowcs - {", src, "} => {", std::wstring_view{ dest, result }, "}");
+            }
+            return result;
+        };
+        decltype(ra3__mbstowcs_l) new_ra3mbstowcs_l = [](wchar_t* dest, char const* src, size_t max, _locale_t locale)
+        {
+            auto const result = ra3__mbstowcs_l(dest, src, max, locale);
+            if (result == -1)
+            {
+                print("_mbstowcs_l - conversion of {", src, "} failed");
+            }
+            else
+            {
+                print("_mbstowcs_l - {", src, "} => {", std::wstring_view{ dest, result }, "}");
+            }
+            return result;
+        };
+        installHook(ra3_mbstowcs, new_ra3mbstowcs);
+        installHook(ra3__mbstowcs_l, new_ra3mbstowcs_l);
+
         const auto processHeap = GetProcessHeap();
         if (processHeap == nullptr)
         {
@@ -228,7 +264,8 @@ bool DLL_API injectDll
     return true;
 }
 
-void installHook(void* const original, void* const newFunction)
+template<typename T>
+void installHook(T* const original, T* const newFunction)
 {
     using boost::locale::conv::utf_to_utf;
 

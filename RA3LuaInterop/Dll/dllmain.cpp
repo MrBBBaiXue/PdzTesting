@@ -463,7 +463,7 @@ int AnalyseCurrentPlayerInLua(std::string_view const replayData, int replaySaver
 
         std::vector<std::string> players;
         boost::split(players, replayData, boost::is_any_of(":"));
-        std::vector<int> playerOrders(players.size());
+        auto playerOrders = std::vector<int>{};
         playerOrders.resize(players.size(), -1);
         int playerOrder = 0;
 

@@ -68,6 +68,16 @@ std::atomic<int> currentPlayerInLua(-1);
 
 auto mutex = std::mutex{};
 auto output = std::ofstream{};
+std::ostream& operator<<(std::ostream& os, std::wstring_view const view)
+{
+    using boost::locale::conv::utf_to_utf;
+    return os << utf_to_utf<char>(view.data(), view.data() + view.size());
+}
+auto const print = [](auto&&... stuffs)
+{
+    auto const lock = std::scoped_lock{ mutex };
+    (output << ... << stuffs) << std::endl;
+};
 
 auto const startLuaBindingLiteral = "start lua binding";
 auto const endLuaBindingLiteral = "end lua binding";
@@ -134,43 +144,29 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
             printL("HMODULE vc2005 not found!");
             return;
         }
-        //
-        ra3_ftell = reinterpret_cast<decltype(&ftell)>(GetProcAddress(vc2005, "ftell"));
-        if (ra3_ftell == NULL)
+        auto const getVC2005Function = [vc2005](auto* prototype, char const* name)
         {
-            printL("ra3_ftell not found!");
-            return;
-        }
-        ra3_fflush = reinterpret_cast<decltype(&fflush)>(GetProcAddress(vc2005, "fflush"));
-        if (ra3_fflush == NULL)
-        {
-            printL("ra3_fflush not found!");
-            return;
-        }
-        ra3__wfopen = reinterpret_cast<decltype(&_wfopen)>(GetProcAddress(vc2005, "_wfopen"));
-        if (ra3__wfopen == NULL)
-        {
-            printL("ra3__wfopen not found!");
-            return;
-        }
-        ra3_fwrite = reinterpret_cast<decltype(&fwrite)>(GetProcAddress(vc2005, "fwrite"));
-        if (ra3_fwrite == NULL)
-        {
-            printL("ra3_fwrite not found!");
-            return;
-        }
-        ra3_fclose = reinterpret_cast<decltype(&fclose)>(GetProcAddress(vc2005, "fclose"));
-        if (ra3_fclose == NULL)
-        {
-            printL("ra3_fclose not found!");
-            return;
-        }
+            auto const result = reinterpret_cast<decltype(prototype)>(GetProcAddress(vc2005, name));
+            if (result == nullptr)
+            {
+                MessageBoxA(nullptr, name, "Failed to get address of", MB_ICONERROR);
+                exit(1);
+            }
+            return result;
+        };
+#define GET_FROM_VC2005(x) getVC2005Function(static_cast<decltype(&x)>(nullptr), #x)
+        ra3_ftell = GET_FROM_VC2005(ftell);
+        ra3_fflush = GET_FROM_VC2005(fflush);
+        ra3__wfopen = GET_FROM_VC2005(_wfopen);
+        ra3_fwrite = GET_FROM_VC2005(fwrite);
+        ra3_fclose = GET_FROM_VC2005(fclose);
+#undef GET_FROM_VC2005
         //hooking...
         installHook(ra3_ftell, new_ftell);
         installHook(ra3__wfopen, new__wfopen);
         installHook(ra3_fwrite, new_fwrite);
         installHook(ra3_fclose, new_fclose);
-        //
+        
         const auto processHeap = GetProcessHeap();
         if (processHeap == nullptr)
         {
@@ -251,16 +247,6 @@ void installHook(void* const original, void* const newFunction)
         throw std::runtime_error{ why };
     }
 }
-std::ostream& operator<<(std::ostream& os, std::wstring_view const view)
-{
-    using boost::locale::conv::utf_to_utf;
-    return os << utf_to_utf<char>(view.data(), view.data() + view.size());
-}
-auto const print = [](auto&&... stuffs)
-{
-    auto const lock = std::scoped_lock{ mutex };
-    (output << ... << stuffs) << std::endl;
-};
 void __stdcall printL(char const* const what)
 {
     print(what);
@@ -464,25 +450,31 @@ int AnalyseCurrentPlayerInLua(std::string_view const replayData, int replaySaver
 {
     try
     {
+        using namespace std::string_view_literals;
+        auto constexpr maxPlayers = 6;
+        auto constexpr observer = "1"sv;
+        auto constexpr commentator = "3"sv;
+
         std::vector<std::string> players;
         boost::split(players, replayData, boost::is_any_of(":"));
         std::vector<int> playerOrders(players.size());
         playerOrders.resize(players.size(), -1);
         int playerOrder = 0;
 
-        for (size_t n = 0; n < players.size(); n++)
+        for (size_t n = 0; n < maxPlayers; n++)
         {
-            if (players.at(n).at(1) == 'H')
+            print("checking player slot #", n, " = {", players.at(n), "}");
+            if (players.at(n).at(0) == 'H')
             {
                 std::vector<std::string> factions;
-                boost::split(factions, players[n], boost::is_any_of(","));
-                if (factions.at(5) == "1" || factions.at(5) == "3")
+                boost::split(factions, players.at(n), boost::is_any_of(","));
+                if (factions.at(5) == observer || factions.at(5) == commentator)
                 {
                     print("player #", n, " {", players.at(n), "} is obs/commentator, skipping");
                     continue;
                 }
             }
-            else if (players[n].at(1) == 'X')
+            else if (players.at(n).at(0) == 'X')
             {
                 print("player slot #", n, "is empty (X), skipping");
                 continue;

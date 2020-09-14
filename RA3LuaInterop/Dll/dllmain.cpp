@@ -60,10 +60,8 @@ auto ra3__wfopen = static_cast<decltype(&_wfopen)>(nullptr);
 auto ra3_fwrite = static_cast<decltype(&fwrite)>(nullptr);
 auto ra3_fclose = static_cast<decltype(&fclose)>(nullptr);
 
-auto ra3_mbstowcs = static_cast<decltype(&mbstowcs)>(nullptr);
-auto ra3__mbstowcs_l = static_cast<decltype(&_mbstowcs_l)>(nullptr);
-
 FILE* replayFile;
+FILE* fwriteFile;
 std::string replayData;
 //target
 std::atomic<int> currentPlayerInLua(-1);
@@ -164,9 +162,6 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
         ra3__wfopen = GET_FROM_VC2005(_wfopen);
         ra3_fwrite = GET_FROM_VC2005(fwrite);
         ra3_fclose = GET_FROM_VC2005(fclose);
-        // utf8
-        ra3_mbstowcs = GET_FROM_VC2005(mbstowcs);
-        ra3__mbstowcs_l = GET_FROM_VC2005(_mbstowcs_l);
 
 #undef GET_FROM_VC2005
         //hooking...
@@ -174,34 +169,6 @@ void DLL_API __stdcall NativeInjectionEntryPoint(REMOTE_ENTRY_INFO* const inRemo
         installHook(ra3__wfopen, new__wfopen);
         installHook(ra3_fwrite, new_fwrite);
         installHook(ra3_fclose, new_fclose);
-        decltype(ra3_mbstowcs) new_ra3mbstowcs = [](wchar_t* dest, char const* src, size_t max)
-        {
-            auto const result = ra3_mbstowcs(dest, src, max);
-            if (result == -1)
-            {
-                print("mbstowcs - conversion of {", src, "} failed");
-            }
-            else
-            {
-                print("mbstowcs - {", src, "} => {", std::wstring_view{ dest, result }, "}");
-            }
-            return result;
-        };
-        decltype(ra3__mbstowcs_l) new_ra3mbstowcs_l = [](wchar_t* dest, char const* src, size_t max, _locale_t locale)
-        {
-            auto const result = ra3__mbstowcs_l(dest, src, max, locale);
-            if (result == -1)
-            {
-                print("_mbstowcs_l - conversion of {", src, "} failed");
-            }
-            else
-            {
-                print("_mbstowcs_l - {", src, "} => {", std::wstring_view{ dest, result }, "}");
-            }
-            return result;
-        };
-        installHook(ra3_mbstowcs, new_ra3mbstowcs);
-        installHook(ra3__mbstowcs_l, new_ra3mbstowcs_l);
 
         const auto processHeap = GetProcessHeap();
         if (processHeap == nullptr)
@@ -391,15 +358,15 @@ __declspec(naked) void newLuaSetGlobal()
 
 long new_ftell(FILE* file)
 {
-    if (file == replayFile)
+    if (file == fwriteFile)
     {
         ra3_fflush(file);
         try
         {
             print("ftell() called on replay file on thread ", GetCurrentThreadId(), ", start analysing replay data...");
             AnalyseReplayData(replayData);
-            printL("replay data analyzed, clearing global variable FILE* replayFile and std::string replayData");
-            replayFile = nullptr;
+            printL("replay data analyzed, clearing global variable FILE* fwriteFile and std::string replayData");
+            fwriteFile = nullptr;
             replayData.clear();
         }
         catch (...)
@@ -419,6 +386,7 @@ FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
     {
         print("replay created with name {", wFileName, "} and mode {", wMode, "}, initializing global variables");
         replayFile = file;
+        fwriteFile = file;
         replayData.clear();
         currentPlayerInLua = -1;
     }
@@ -427,7 +395,7 @@ FILE* new__wfopen(const wchar_t* fileName, const wchar_t* mode)
 
 size_t new_fwrite(const void* buffer, size_t elementSize, size_t elementCount, FILE* file)
 {
-    if (file == replayFile)
+    if (file == fwriteFile)
     {
         try
         {
@@ -448,6 +416,7 @@ int new_fclose(FILE* file)
     {
         printL("replay file is being closed, clearing global variables and currentPlayerInLua");
         replayFile = nullptr;
+        fwriteFile = nullptr;
         replayData.clear();
         currentPlayerInLua = -1;
     }
